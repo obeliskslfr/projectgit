@@ -1,41 +1,73 @@
-name: CI/CD Pipeline
+name: CI spring angular 
 
 on:
   push:
     branches:
-      - main
+    - main
+
 
 jobs:
-  build-and-push:
+  # This workflow containsa single job called  "build"
+  build-and-deploy:
+    # The type of runner that the job will run on
     runs-on: ubuntu-latest
+    env: 
+      DOCKERHUB_USERNAME: ${{secrets.DOCKERHUB_USERNAME}}
 
     steps:
-      # Étape 1 : Récupérer le code
-      - name: Checkout code
-        uses: actions/checkout@v3
+    - name: checkout code source 
+      uses:  actions/checkout@v6
+    
+    - name: build & test spring boot
+      run: |
+        cd springboot/app
+        chmod +x mvnw
+        ./mvnw clean package 
+        ./mvnw clean verify 
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
 
-      # Étape 2 : Se connecter à Docker Hub
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+    - name: Login to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{secrets.DOCKERHUB_USERNAME}}
+        password: ${{secrets.DOCKERHUB_TOKEN}}
+    - name: build image spring 
+      run: |
+        docker build -t haythembensouissi/spring-app springboot/app
+        docker push haythembensouissi/spring-app
+    - name: build image angular 
+      run: |
+        docker build -t haythembensouissi/angular-app angular-app
+        docker push haythembensouissi/angular-app
+       
+    - name: Run docker compose 
+      run: |
+        docker compose down 
+        docker compose up -d 
+    - name: Check containers
+      run: |
+           docker ps 
+    - name: Wait for backend
+      run: |
+       echo "Waiting for Spring Boot to be ready..."
+       for i in {1..15}; do
+          if curl -s http://localhost:8081; then
+            echo "Backend is up!"
+            exit 0
+          fi
+          echo "Not ready yet..."
+          sleep 5
+           done
+           echo "Backend failed to start"
+           docker logs deploy-app-spring-angular-spring-boot-app-1
+            exit 1
 
-      # Étape 3 : Builder l'image backend
-      - name: Build Spring Boot image
-        run: docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/spring-app:latest ./springboot/app
+    - name: test backend
+      run: |
+           curl http://localhost:8081
+    - name: test frontend
+      run: |
+           curl http://localhost:4200
 
-      # Étape 4 : Builder l'image frontend
-      - name: Build Angular image
-        run: docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/angular-app:latest ./angular-app
 
-      # Étape 5 : Pousser les images
-      - name: Push Spring Boot image
-        run: docker push ${{ secrets.DOCKERHUB_USERNAME }}/spring-app:latest
-
-      - name: Push Angular image
-        run: docker push ${{ secrets.DOCKERHUB_USERNAME }}/angular-app:latest
-
-      # Étape 6 : Lancer l'application
-      - name: Run docker-compose
-        run: docker-compose up -d
